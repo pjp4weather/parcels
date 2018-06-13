@@ -508,7 +508,7 @@ static inline ErrorCode temporal_interpolation_structured_grid(float x, float y,
   }
 }
 
-static inline ErrorCode temporal_interpolation(float x, float y, float z, double time, CField *f, 
+static inline ErrorCode temporal_interpolation(float z, float y, float x, double time, CField *f,
                                                 void * vxi,  void * vyi,  void * vzi,  void * vti, float *value, int interp_method)
 {
   CGrid *_grid = f->grid;

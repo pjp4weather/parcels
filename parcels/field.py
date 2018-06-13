@@ -797,7 +797,7 @@ class Field(object):
         else:
             return depth_index.argmin() - 1 if depth_index.any() else 0
 
-    def eval(self, time, x, y, z, applyConversion=True):
+    def eval(self, time, z, y, x, applyConversion=True):
         """Interpolate field values in space and time.
 
         We interpolate linearly in time and apply implicit unit
