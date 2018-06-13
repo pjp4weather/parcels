@@ -187,7 +187,7 @@ def test_rectilinear_s_grid_sampling(mode, z4d):
     field_set = FieldSet(u_field, v_field, fields=other_fields)
 
     def sampleTemp(particle, fieldset, time, dt):
-        particle.temp = fieldset.temp[time, particle.lon, particle.lat, particle.depth]
+        particle.temp = fieldset.temp[time, particle.depth, particle.lat, particle.lon]
 
     class MyParticle(ptype[mode]):
         temp = Variable('temp', dtype=np.float32, initial=20.)
@@ -278,7 +278,7 @@ def test_rectilinear_s_grids_advect2(mode):
 
     def moveEast(particle, fieldset, time, dt):
         particle.lon += 5 * dt
-        particle.relDepth = fieldset.relDepth[time, particle.lon, particle.lat, particle.depth]
+        particle.relDepth = fieldset.relDepth[time, particle.depth, particle.lat, particle.lon]
 
     depth = .9
     pset = ParticleSet.from_list(field_set, MyParticle, lon=[0], lat=[0], depth=[depth])
@@ -313,8 +313,8 @@ def test_curvilinear_grids(mode):
     field_set = FieldSet(u_field, v_field)
 
     def sampleSpeed(particle, fieldset, time, dt):
-        u = fieldset.U[time, particle.lon, particle.lat, particle.depth]
-        v = fieldset.V[time, particle.lon, particle.lat, particle.depth]
+        u = fieldset.U[time, particle.depth, particle.lat, particle.lon]
+        v = fieldset.V[time, particle.depth, particle.lat, particle.lon]
         particle.speed = math.sqrt(u*u+v*v)
 
     class MyParticle(ptype[mode]):
@@ -356,7 +356,7 @@ def test_nemo_grid(mode):
     field_set = FieldSet.from_netcdf(filenames, variables, dimensions, mesh='spherical')
 
     def sampleVel(particle, fieldset, time, dt):
-        (particle.zonal, particle.meridional) = fieldset.UV[time, particle.lon, particle.lat, particle.depth]
+        (particle.zonal, particle.meridional) = fieldset.UV[time, particle.depth, particle.lat, particle.lon]
 
     class MyParticle(ptype[mode]):
         zonal = Variable('zonal', dtype=np.float32, initial=0.)

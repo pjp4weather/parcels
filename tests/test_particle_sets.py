@@ -352,7 +352,7 @@ def test_variable_written_ondelete(fieldset, mode, tmpdir, npart=3):
     filepath = tmpdir.join("pfile_on_delete_written_variables")
 
     def move_west(particle, fieldset, time, dt):
-        tmp = fieldset.U[time, particle.lon, particle.lat, particle.depth]  # to trigger out-of-bounds error
+        tmp = fieldset.U[time, particle.depth, particle.lat, particle.lon]  # to trigger out-of-bounds error
         particle.lon -= 0.1 + tmp
 
     def DeleteP(particle, fieldset, time, dt):
