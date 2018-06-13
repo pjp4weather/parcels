@@ -65,7 +65,7 @@ def stommel_fieldset(xdim=200, ydim=200):
 
 
 def UpdateP(particle, fieldset, time, dt):
-    particle.p = fieldset.P[time, particle.lon, particle.lat, particle.depth]
+    particle.p = fieldset.P[time, particle.depth, particle.lat, particle.lon]
 
 
 def stommel_example(npart=1, mode='jit', verbose=False, method=AdvectionRK4):
@@ -118,7 +118,7 @@ def test_stommel_fieldset(mode):
     assert np.allclose([p.lat for p in psetRK4], [p.lat for p in psetRK45], rtol=1e-3)
     err_adv = np.array([abs(p.p_start - p.p) for p in psetRK4])
     assert(err_adv <= 1.e-1).all()
-    err_smpl = np.array([abs(p.p - psetRK4.fieldset.P[0., p.lon, p.lat, p.depth]) for p in psetRK4])
+    err_smpl = np.array([abs(p.p - psetRK4.fieldset.P[0., p.depth, p.lat, p.lon]) for p in psetRK4])
     assert(err_smpl <= 1.e-1).all()
     timer.stommel.stop()
     timer.root.stop()
