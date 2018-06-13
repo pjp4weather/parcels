@@ -50,7 +50,7 @@ class OutOfBoundsError(KernelError):
             )
         else:
             message = "Out-of-bounds sampling by particle at (%f, %f, %f)" % (
-                particle.lon, particle.lat, particle.depth
+                particle.depth, particle.lat, particle.lon
             )
         super(OutOfBoundsError, self).__init__(particle, fieldset=fieldset, msg=message)
 
