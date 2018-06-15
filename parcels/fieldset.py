@@ -108,6 +108,9 @@ class FieldSet(object):
                 if g.defer_load:
                     g.time_full = g.time_full + (g.time_origin - ugrid.time_origin) / np.timedelta64(1, 's')
                 g.time_origin = ugrid.time_origin
+        for f in self.fields:
+            if f.name is not 'UV':
+                f.grid.fields.append(f)
 
     @classmethod
     def from_netcdf(cls, filenames, variables, dimensions, indices=None,
@@ -384,21 +387,22 @@ class FieldSet(object):
                 continue
             g = f.grid
             if g.update_status == 'first_updated':  # First load of data
-                data = np.empty((g.tdim, g.zdim, g.ydim-2*g.meridional_halo, g.xdim-2*g.zonal_halo), dtype=np.float32)
-                for tindex in range(3):
-                    data = f.computeTimeChunk(data, tindex)
-                if f._scaling_factor:
-                    data *= f._scaling_factor
-                f.data = f.reshape(data)
+                f.data = np.empty((g.tdim, g.zdim_loaded, g.ydim_loaded, g.xdim_loaded), dtype=np.float32)
+                #data = np.empty((g.tdim, g.zdim, g.ydim-2*g.meridional_halo, g.xdim-2*g.zonal_halo), dtype=np.float32)
+                #for tindex in range(3):
+                #    data = f.computeTimeChunk(data, tindex)
+                #if f._scaling_factor:
+                #    data *= f._scaling_factor
+                #f.data = f.reshape(data)
             elif g.update_status == 'updated':
-                data = np.empty((g.tdim, g.zdim, g.ydim-2*g.meridional_halo, g.xdim-2*g.zonal_halo), dtype=np.float32)
+                data = np.empty((g.tdim, g.zdim, g.ydim_loaded-2*g.meridional_halo, g.xdim_loaded-2*g.zonal_halo), dtype=np.float32)
                 if signdt >= 0:
                     f.data[:2, :] = f.data[1:, :]
                     tindex = 2
                 else:
                     f.data[1:, :] = f.data[:2, :]
                     tindex = 0
-                data = f.computeTimeChunk(data, tindex)
+                data = f.computeTimeChunk(data, tindex, g.available_indices, [])
                 if f._scaling_factor:
                     data *= f._scaling_factor
                 f.data[tindex, :] = f.reshape(data)[tindex, :]
@@ -411,3 +415,21 @@ class FieldSet(object):
                 return nextTime
             else:
                 return time + nSteps * dt
+
+    def loadSpatialChunk(self):
+        chunksize = 20  # arbitrary...
+        for g in self.gridset.grids:
+            old_indices = g.available_indices.copy()
+            g.available_indices[0] = int(g.targeted_indices[0]/chunksize) * chunksize
+            g.available_indices[1] = min((int(g.targeted_indices[1]/chunksize)+1) * chunksize, g.xdim)
+            g.available_indices[2] = int(g.targeted_indices[2]/chunksize) * chunksize
+            g.available_indices[3] = min((int(g.targeted_indices[3]/chunksize)+1) * chunksize, g.ydim)
+            g.xdim_loaded = g.available_indices[1]-g.available_indices[0]
+            g.ydim_loaded = g.available_indices[3]-g.available_indices[2]
+            for f in g.fields:
+                data = np.empty((g.tdim, g.zdim, g.ydim_loaded, g.xdim_loaded), dtype=np.float32)
+                for tindex in range(3):
+                    data = f.computeTimeChunk(data, tindex, g.available_indices, old_indices)
+                if f._scaling_factor:
+                    data *= f._scaling_factor
+                f.data = f.reshape(data)

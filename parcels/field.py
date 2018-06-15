@@ -29,6 +29,13 @@ class FieldSamplingError(RuntimeError):
         super(FieldSamplingError, self).__init__(message)
 
 
+class FieldSubSetNotLoadedError(RuntimeError):
+    """Utility error class to propagate erroneous field sampling"""
+
+    def __init__(self):
+        super(FieldSubSetNotLoadedError, self).__init__()
+
+
 class TimeExtrapolationError(RuntimeError):
     """Utility error class to propagate erroneous time extrapolation sampling"""
 
@@ -374,10 +381,10 @@ class Field(object):
             if len(data.shape) == 4:
                 data = data.reshape(sum(((data.shape[0],), data.shape[2:]), ()))
         if len(data.shape) == 4:
-            assert data.shape == (self.grid.tdim, self.grid.zdim, self.grid.ydim-2*self.grid.meridional_halo, self.grid.xdim-2*self.grid.zonal_halo), \
+            assert data.shape == (self.grid.tdim, self.grid.zdim, self.grid.ydim_loaded-2*self.grid.meridional_halo, self.grid.xdim_loaded-2*self.grid.zonal_halo), \
                                  ('Field %s expecting a data shape of a [ydim, xdim], [zdim, ydim, xdim], [tdim, ydim, xdim] or [tdim, zdim, ydim, xdim]. Flag transpose=True could help to reorder the data.')
         else:
-            assert data.shape == (self.grid.tdim, self.grid.ydim-2*self.grid.meridional_halo, self.grid.xdim-2*self.grid.zonal_halo), \
+            assert data.shape == (self.grid.tdim, self.grid.ydim_loaded-2*self.grid.meridional_halo, self.grid.xdim_loaded-2*self.grid.zonal_halo), \
                                  ('Field %s expecting a data shape of a [ydim, xdim], [zdim, ydim, xdim], [tdim, ydim, xdim] or [tdim, zdim, ydim, xdim]. Flag transpose=True could help to reorder the data.')
         if self.grid.meridional_halo > 0 or self.grid.zonal_halo > 0:
             data = self.add_periodic_halo(zonal=self.grid.zonal_halo > 0, meridional=self.grid.meridional_halo > 0, halosize=max(self.grid.meridional_halo, self.grid.zonal_halo), data=data)
@@ -689,6 +696,19 @@ class Field(object):
         xi = 0
         yi = 0
         (xsi, eta, trash, xi, yi, trash) = self.search_indices(x, y, z, xi, yi)
+        if (xi < self.grid.available_indices[0] or
+            xi > self.grid.available_indices[1] or
+            yi < self.grid.available_indices[2] or
+            yi > self.grid.available_indices[3]):
+            self.grid.targeted_indices[0] = min(xi, self.grid.targeted_indices[0])
+            self.grid.targeted_indices[1] = max(xi+1, self.grid.targeted_indices[1])
+            self.grid.targeted_indices[2] = min(yi, self.grid.targeted_indices[2])
+            self.grid.targeted_indices[3] = max(yi+1, self.grid.targeted_indices[3])
+            print xi, yi
+            print self.grid.available_indices
+            raise FieldSubSetNotLoadedError
+        xi -= self.grid.available_indices[0]
+        yi -= self.grid.available_indices[2]
         if self.interp_method is 'nearest':
             xii = xi if xsi <= .5 else xi+1
             yii = yi if eta <= .5 else yi+1
@@ -745,7 +765,8 @@ class Field(object):
 
         if self.grid.gtype is GridCode.RectilinearZGrid:  # The only case where we use scipy interpolation
             if self.grid.zdim == 1:
-                val = self.interpolator2D_scipy(ti)((y, x))
+                val = self.interpolator2D(ti, z, y, x)
+                #val = self.interpolator2D_scipy(ti)((y, x))
             else:
                 val = self.interpolator3D_rectilinear_z(ti, z, y, x)
         elif self.grid.gtype in [GridCode.RectilinearSGrid, GridCode.CurvilinearZGrid, GridCode.CurvilinearSGrid]:
@@ -999,7 +1020,7 @@ class Field(object):
             self.data = np.concatenate((field_new.data[:, :, :], self.data[:-1, :, :]), 0)
             self.time = self.grid.time
 
-    def computeTimeChunk(self, data, tindex):
+    def computeTimeChunk(self, data, tindex, indices, loaded_indices):
         g = self.grid
         with NetcdfFileBuffer(self.timeFiles[g.ti+tindex], self.dimensions, self.indices) as filebuffer:
             filebuffer.name = self.dimensions['data'] if 'data' in self.dimensions else self.name
@@ -1009,14 +1030,14 @@ class Field(object):
                 time_data = (time_data - g.time_origin) / np.timedelta64(1, 's')
             ti = (time_data <= g.time[tindex]).argmin() - 1
             if len(filebuffer.dataset[filebuffer.name].shape) == 2:
-                data[tindex, 0, :, :] = filebuffer.data[:, :]
+                data[tindex, 0, :, :] = filebuffer.data[indices[2]:indices[3], indices[0]:indices[1]]
             elif len(filebuffer.dataset[filebuffer.name].shape) == 3:
                 if g.zdim > 1:
-                    data[tindex, :, :, :] = filebuffer.data[:, :, :]
+                    data[tindex, :, :, :] = filebuffer.data[:, indices[2]:indices[3], indices[0]:indices[1]]
                 else:
-                    data[tindex, 0, :, :] = filebuffer.data[ti, :, :]
+                    data[tindex, 0, :, :] = filebuffer.data[ti, indices[2]:indices[3], indices[0]:indices[1]]
             else:
-                data[tindex, :, :, :] = filebuffer.data[ti, :, :, :]
+                data[tindex, :, :, :] = filebuffer.data[ti, :, indices[2]:indices[3], indices[0]:indices[1]]
         data[np.isnan(data)] = 0.
         if self.vmin is not None:
             data[data < self.vmin] = 0.

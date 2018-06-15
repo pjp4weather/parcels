@@ -1,7 +1,7 @@
 from parcels.codegenerator import KernelGenerator, LoopGenerator
 from parcels.compiler import get_cache_dir
 from parcels.kernels.error import ErrorCode, recovery_map as recovery_base_map
-from parcels.field import FieldSamplingError
+from parcels.field import FieldSamplingError, FieldSubSetNotLoadedError
 from parcels.loggers import logger
 from parcels.kernels.advection import AdvectionRK4_3D
 from os import path, remove
@@ -208,6 +208,9 @@ class Kernel(object):
                 except FieldSamplingError as fse:
                     res = ErrorCode.ErrorOutOfBounds
                     p.exception = fse
+                except FieldSubSetNotLoadedError as fssnle:
+                    res = ErrorCode.Repeat
+                    p.exception = fssnle
                 except Exception as e:
                     res = ErrorCode.Error
                     p.exception = e
@@ -227,7 +230,8 @@ class Kernel(object):
                 elif res == ErrorCode.Repeat:
                     # Try again without time update
                     for var in ptype.variables:
-                        setattr(p, var.name, p_var_back[var.name])
+                        if var.name != 'state':
+                            setattr(p, var.name, p_var_back[var.name])
                     dt_pos = min(abs(p.dt), abs(endtime - p.time))
                     break
                 else:
@@ -258,9 +262,22 @@ class Kernel(object):
         # Remove all particles that signalled deletion
         remove_deleted(pset)
 
-        # Idenitify particles that threw errors
-        error_particles = [p for p in pset.particles
-                           if p.state not in [ErrorCode.Success, ErrorCode.Repeat]]
+        repeat_particles = [p for p in pset.particles if p.state is ErrorCode.Repeat]
+        while len(repeat_particles) > 0:
+            pset.fieldset.loadSpatialChunk()
+            for p in repeat_particles:
+                p.state = ErrorCode.Success
+            # Execute core loop again to continue interrupted particles
+            if self.ptype.uses_jit:
+                self.execute_jit(pset, endtime, dt)
+            else:
+                self.execute_python(pset, endtime, dt)
+
+            repeat_particles = [p for p in pset.particles if p.state is ErrorCode.Repeat]
+
+
+        # Identify particles that threw errors
+        error_particles = [p for p in pset.particles if p.state != ErrorCode.Success]
         while len(error_particles) > 0:
             # Apply recovery kernel
             for p in error_particles:
@@ -277,8 +294,7 @@ class Kernel(object):
             else:
                 self.execute_python(pset, endtime, dt)
 
-            error_particles = [p for p in pset.particles
-                               if p.state not in [ErrorCode.Success, ErrorCode.Repeat]]
+            error_particles = [p for p in pset.particles if p.state != ErrorCode.Success]
 
     def merge(self, kernel):
         funcname = self.funcname + kernel.funcname

@@ -50,6 +50,7 @@ class Grid(object):
         self.meridional_halo = 0
         self.lat_flipped = False
         self.defer_load = False
+        self.fields = []
 
     @property
     def ctypes_struct(self):
@@ -68,6 +69,8 @@ class Grid(object):
             _fields_ = [('xdim', c_int), ('ydim', c_int), ('zdim', c_int),
                         ('tdim', c_int), ('z4d', c_int),
                         ('mesh_spherical', c_int), ('zonal_periodic', c_int),
+                        ('available_indices', POINTER(c_int)),
+                        ('targeted_indices', POINTER(c_int)),
                         ('lon', POINTER(c_float)), ('lat', POINTER(c_float)),
                         ('depth', POINTER(c_float)), ('time', POINTER(c_double))
                         ]
@@ -77,6 +80,8 @@ class Grid(object):
             self.cstruct = CStructuredGrid(self.xdim, self.ydim, self.zdim,
                                            self.tdim, self.z4d,
                                            self.mesh == 'spherical', self.zonal_periodic,
+                                           self.available_indices.ctypes.data_as(POINTER(c_int)),
+                                           self.targeted_indices.ctypes.data_as(POINTER(c_int)),
                                            self.lon.ctypes.data_as(POINTER(c_float)),
                                            self.lat.ctypes.data_as(POINTER(c_float)),
                                            self.depth.ctypes.data_as(POINTER(c_float)),
@@ -120,6 +125,7 @@ class Grid(object):
         self.zonal_periodic = sum(dx) > 359.9
 
     def computeTimeChunk(self, f, time, signdt):
+        print 'computeTimeChunk'
         nextTime_loc = np.infty * signdt
         if self.update_status == 'not_updated':
             if self.ti >= 0:
@@ -143,6 +149,10 @@ class Grid(object):
                     self.ti = len(self.time_full) - 3
                 self.time = self.time_full[self.ti:self.ti+3]
                 self.tdim = 3
+                self.xdim_loaded = 0
+                self.ydim_loaded = 0
+                self.zdim_loaded = 0
+                self.available_indices = np.zeros(6, dtype=np.int32)
                 self.update_status = 'first_updated'
             if signdt >= 0 and self.ti < len(self.time_full)-3:
                 nextTime_loc = self.time[2]
@@ -167,6 +177,8 @@ class RectilinearGrid(Grid):
         Grid.__init__(self, lon, lat, time, time_origin, mesh)
         self.xdim = self.lon.size
         self.ydim = self.lat.size
+        self.xdim_loaded = self.xdim
+        self.ydim_loaded = self.ydim
         self.tdim = self.time.size
         if self.lat[-1] < self.lat[0]:
             self.lat = np.flip(self.lat, axis=0)
@@ -225,6 +237,9 @@ class RectilinearZGrid(RectilinearGrid):
         self.gtype = GridCode.RectilinearZGrid
         self.depth = np.zeros(1, dtype=np.float32) if depth is None else depth
         self.zdim = self.depth.size
+        self.zdim_loaded = self.zdim
+        self.available_indices = np.array([0, self.xdim, 0, self.ydim, 0, self.zdim], dtype=np.int32)
+        self.targeted_indices = np.array([self.xdim, 0, self.ydim, 0, self.zdim, 0], dtype=np.int32)
         self.z4d = -1  # only used in RectilinearSGrid
         if not self.depth.dtype == np.float32:
             logger.warning_once("Casting depth data to np.float32")
@@ -261,6 +276,9 @@ class RectilinearSGrid(RectilinearGrid):
         self.gtype = GridCode.RectilinearSGrid
         self.depth = depth
         self.zdim = self.depth.shape[-3]
+        self.zdim_loaded = self.zdim
+        self.available_indices = np.array([0, self.xdim, 0, self.ydim, 0, self.zdim], dtype=np.int32)
+        self.targeted_indices = np.array([self.xdim, 0, self.ydim, 0, self.zdim, 0], dtype=np.int32)
         self.z4d = len(self.depth.shape) == 4
         if self.z4d:
             assert self.tdim == self.depth.shape[0], 'depth dimension has the wrong format. It should be [tdim, zdim, ydim, xdim]'
@@ -290,6 +308,8 @@ class CurvilinearGrid(Grid):
         Grid.__init__(self, lon, lat, time, time_origin, mesh)
         self.xdim = self.lon.shape[1]
         self.ydim = self.lon.shape[0]
+        self.xdim_loaded = self.xdim
+        self.ydim_loaded = self.ydim
         self.tdim = self.time.size
 
     def add_periodic_halo(self, zonal, meridional, halosize=5):
@@ -354,6 +374,9 @@ class CurvilinearZGrid(CurvilinearGrid):
         self.gtype = GridCode.CurvilinearZGrid
         self.depth = np.zeros(1, dtype=np.float32) if depth is None else depth
         self.zdim = self.depth.size
+        self.zdim_loaded = self.zdim
+        self.available_indices = np.array([0, self.xdim, 0, self.ydim, 0, self.zdim], dtype=np.int32)
+        self.targeted_indices = np.array([self.xdim, 0, self.ydim, 0, self.zdim, 0], dtype=np.int32)
         self.z4d = -1  # only for SGrid
         if not self.depth.dtype == np.float32:
             logger.warning_once("Casting depth data to np.float32")
@@ -389,6 +412,9 @@ class CurvilinearSGrid(CurvilinearGrid):
         self.gtype = GridCode.CurvilinearSGrid
         self.depth = depth
         self.zdim = self.depth.shape[-3]
+        self.zdim_loaded = self.zdim
+        self.available_indices = np.array([0, self.xdim, 0, self.ydim, 0, self.zdim], dtype=np.int32)
+        self.targeted_indices = np.array([self.xdim, 0, self.ydim, 0, self.zdim, 0], dtype=np.int32)
         self.z4d = len(self.depth.shape) == 4
         if self.z4d:
             assert self.tdim == self.depth.shape[0], 'depth dimension has the wrong format. It should be [tdim, zdim, ydim, xdim]'

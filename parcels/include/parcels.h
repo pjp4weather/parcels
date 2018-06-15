@@ -35,6 +35,7 @@ typedef struct
 {
   int xdim, ydim, zdim, tdim, z4d;
   int sphere_mesh, zonal_periodic;
+  int *available_indices, *targeted_indices;
   float *lon, *lat, *depth;
   double *time;
 } CStructuredGrid;
