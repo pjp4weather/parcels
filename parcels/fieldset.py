@@ -1,4 +1,4 @@
-from parcels.field import Field
+from parcels.field import Field, VectorField
 from parcels.gridset import GridSet
 from parcels.grid import RectilinearZGrid
 from parcels.scripts import compute_curvilinearGrid_rotationAngles
@@ -19,19 +19,17 @@ class FieldSet(object):
     :param V: :class:`parcels.field.Field` object for meridional velocity component
     :param fields: Dictionary of additional :class:`parcels.field.Field` objects
     """
-    def __init__(self, U, V, fields={}):
+    def __init__(self, U, V, fields=None):
         self.gridset = GridSet()
         if U:
             self.add_field(U)
         if V:
             self.add_field(V)
-        UV = Field('UV', None)
-        UV.fieldset = self
-        self.UV = UV
 
         # Add additional fields as attributes
-        for name, field in fields.items():
-            self.add_field(field)
+        if fields:
+            for name, field in fields.items():
+                self.add_field(field)
 
     @classmethod
     def from_data(cls, data, dimensions, transpose=False, mesh='spherical',
@@ -94,6 +92,14 @@ class FieldSet(object):
         self.gridset.add_grid(field)
         field.fieldset = self
 
+    def add_vector_field(self, vfield):
+        """Add a :class:`parcels.field.VectorField` object to the FieldSet
+
+        :param vfield: :class:`parcels.field.VectorField` object to be added
+        """
+        setattr(self, vfield.name, vfield)
+        vfield.fieldset = self
+
     def check_complete(self):
         assert(self.U), ('U field is not defined')
         assert(self.V), ('V field is not defined')
@@ -109,8 +115,12 @@ class FieldSet(object):
                     g.time_full = g.time_full + (g.time_origin - ugrid.time_origin) / np.timedelta64(1, 's')
                 g.time_origin = ugrid.time_origin
         for f in self.fields:
-            if f.name is not 'UV':
+            if isinstance(f, Field):
                 f.grid.fields.append(f)
+        if not hasattr(self, 'UV'):
+            self.add_vector_field(VectorField('UV', self.U, self.V))
+        if not hasattr(self, 'UVW') and hasattr(self, 'W'):
+            self.add_vector_field(VectorField('UVW', self.U, self.V, self.W))
 
     @classmethod
     def from_netcdf(cls, filenames, variables, dimensions, indices=None,
@@ -244,7 +254,7 @@ class FieldSet(object):
                                allow_time_extrapolation=allow_time_extrapolation, **kwargs)
 
     @classmethod
-    def from_parcels(cls, basename, uvar='vozocrtx', vvar='vomecrty', indices=None, extra_fields={},
+    def from_parcels(cls, basename, uvar='vozocrtx', vvar='vomecrty', indices=None, extra_fields=None,
                      allow_time_extrapolation=None, time_periodic=False, full_load=False, **kwargs):
         """Initialises FieldSet data from NetCDF files using the Parcels FieldSet.write() conventions.
 
@@ -264,6 +274,9 @@ class FieldSet(object):
                a better memory management during particle set execution.
                full_load is however sometimes necessary for plotting the fields.
         """
+
+        if extra_fields is None:
+            extra_fields = {}
 
         dimensions = {}
         default_dims = {'lon': 'nav_lon', 'lat': 'nav_lat',
@@ -356,7 +369,7 @@ class FieldSet(object):
             gnew.advanced = False
 
         for fnew in fieldset_new.fields:
-            if fnew.name == 'UV':
+            if isinstance(fnew, VectorField):
                 continue
             f = getattr(self, fnew.name)
             gnew = fnew.grid
@@ -376,14 +389,14 @@ class FieldSet(object):
         for g in self.gridset.grids:
             g.update_status = 'not_updated'
         for f in self.fields:
-            if f.name == 'UV' or not f.grid.defer_load:
+            if isinstance(f, VectorField) or not f.grid.defer_load:
                 continue
             if f.grid.update_status == 'not_updated':
                 nextTime_loc = f.grid.computeTimeChunk(f, time, signdt)
             nextTime = min(nextTime, nextTime_loc) if signdt >= 0 else max(nextTime, nextTime_loc)
 
         for f in self.fields:
-            if f.name == 'UV' or not f.grid.defer_load:
+            if isinstance(f, VectorField) or not f.grid.defer_load or f.is_gradient:
                 continue
             g = f.grid
             if g.update_status == 'first_updated':  # First load of data
@@ -406,6 +419,8 @@ class FieldSet(object):
                 if f._scaling_factor:
                     data *= f._scaling_factor
                 f.data[tindex, :] = f.reshape(data)[tindex, :]
+            if f.gradientx is not None and g.update_status in ['first_updated', 'updated']:
+                f.gradient(update=True)
 
         if abs(nextTime) == np.infty or np.isnan(nextTime):  # Second happens when dt=0
             return nextTime

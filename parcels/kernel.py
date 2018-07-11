@@ -89,19 +89,20 @@ class Kernel(object):
         # Generate the kernel function and add the outer loop
         if self.ptype.uses_jit:
             kernelgen = KernelGenerator(fieldset, ptype)
-            self.field_args = kernelgen.field_args
             kernel_ccode = kernelgen.generate(deepcopy(self.py_ast),
                                               self.funcvars)
             self.field_args = kernelgen.field_args
-            if 'UV' in self.field_args:
-                fieldset = self.field_args['UV'].fieldset
-                for f in ['U', 'V', 'cosU', 'sinU', 'cosV', 'sinV']:
-                    if f not in self.field_args:
+            self.vector_field_args = kernelgen.vector_field_args
+            fieldset = self.fieldset
+            for fname in self.vector_field_args:
+                f = getattr(fieldset, fname)
+                Wname = f.W.name if f.W else 'not_defined'
+                for sF in [f.U.name, f.V.name, Wname, 'cosU', 'sinU', 'cosV', 'sinV']:
+                    if sF not in self.field_args:
                         try:
-                            self.field_args[f] = getattr(fieldset, f)
+                            self.field_args[sF] = getattr(fieldset, sF)
                         except:
                             continue
-                del self.field_args['UV']
             self.const_args = kernelgen.const_args
             loopgen = LoopGenerator(fieldset, ptype)
             if path.isfile(c_include):
@@ -230,7 +231,7 @@ class Kernel(object):
                 elif res == ErrorCode.Repeat:
                     # Try again without time update
                     for var in ptype.variables:
-                        if var.name != 'state':
+                        if var.name not in ['dt', 'state']:
                             setattr(p, var.name, p_var_back[var.name])
                     dt_pos = min(abs(p.dt), abs(endtime - p.time))
                     break
@@ -281,9 +282,12 @@ class Kernel(object):
         while len(error_particles) > 0:
             # Apply recovery kernel
             for p in error_particles:
-                recovery_kernel = recovery_map[p.state]
-                p.state = ErrorCode.Success
-                recovery_kernel(p, self.fieldset, p.time, dt)
+                if p.state == ErrorCode.Repeat:
+                    p.state = ErrorCode.Success
+                else:
+                    recovery_kernel = recovery_map[p.state]
+                    p.state = ErrorCode.Success
+                    recovery_kernel(p, self.fieldset, p.time, dt)
 
             # Remove all particles that signalled deletion
             remove_deleted(pset)
