@@ -263,9 +263,9 @@ class Kernel(object):
         # Remove all particles that signalled deletion
         remove_deleted(pset)
 
-        repeat_particles = [p for p in pset.particles if p.state is ErrorCode.Repeat]
+        repeat_particles = [p for p in pset.particles if p.state == ErrorCode.Repeat]
         while len(repeat_particles) > 0:
-            pset.fieldset.loadSpatialChunk()
+            pset.fieldset.loadDataChunk()
             for p in repeat_particles:
                 p.state = ErrorCode.Success
             # Execute core loop again to continue interrupted particles
@@ -274,7 +274,7 @@ class Kernel(object):
             else:
                 self.execute_python(pset, endtime, dt)
 
-            repeat_particles = [p for p in pset.particles if p.state is ErrorCode.Repeat]
+            repeat_particles = [p for p in pset.particles if p.state == ErrorCode.Repeat]
 
 
         # Identify particles that threw errors

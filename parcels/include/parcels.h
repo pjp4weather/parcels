@@ -10,6 +10,9 @@ extern "C" {
 #include "random.h"
 #include "index_search.h"
 
+#define min(X, Y) (((X) < (Y)) ? (X) : (Y))
+#define max(X, Y) (((X) > (Y)) ? (X) : (Y))
+
 typedef enum
   {
     LINEAR=0, NEAREST=1
@@ -118,23 +121,34 @@ static inline ErrorCode temporal_interpolation_structured_grid(float x, float y,
     double t0 = grid->time[ti[igrid]]; double t1 = grid->time[ti[igrid]+1];
     /* Identify grid cell to sample through local linear search */
     err = search_indices(x, y, z, grid->xdim, grid->ydim, grid->zdim, grid->lon, grid->lat, grid->depth, &xi[igrid], &yi[igrid], &zi[igrid], &xsi, &eta, &zeta, grid->sphere_mesh, grid->zonal_periodic, gcode, grid->z4d, ti[igrid], grid->tdim, time, t0, t1); CHECKERROR(err);
+    if ( (xi[igrid] < grid->available_indices[0]) || (xi[igrid] > grid->available_indices[1]) ||
+         (yi[igrid] < grid->available_indices[2]) || (yi[igrid] > grid->available_indices[3]) )
+    {
+       grid->targeted_indices[0] = min(xi[igrid], grid->targeted_indices[0]);
+       grid->targeted_indices[1] = max(xi[igrid]+1, grid->targeted_indices[1]);
+       grid->targeted_indices[2] = min(yi[igrid], grid->targeted_indices[2]);
+       grid->targeted_indices[3] = max(yi[igrid]+1, grid->targeted_indices[3]);
+       return REPEAT;
+    }
+    xi[igrid] -= grid->available_indices[0];
+    yi[igrid] -= grid->available_indices[2];
     if (interp_method == LINEAR){
       if (grid->zdim==1){
-        err = spatial_interpolation_bilinear(xsi, eta, xi[igrid], yi[igrid], grid->xdim, (float**)(data[ti[igrid]]), &f0);
-        err = spatial_interpolation_bilinear(xsi, eta, xi[igrid], yi[igrid], grid->xdim, (float**)(data[ti[igrid]+1]), &f1);
+        err = spatial_interpolation_bilinear(xsi, eta, xi[igrid], yi[igrid], f->xdim, (float**)(data[ti[igrid]]), &f0);
+        err = spatial_interpolation_bilinear(xsi, eta, xi[igrid], yi[igrid], f->xdim, (float**)(data[ti[igrid]+1]), &f1);
       } else {
-        err = spatial_interpolation_trilinear(xsi, eta, zeta, xi[igrid], yi[igrid], zi[igrid], grid->xdim, grid->ydim, (float**)(data[ti[igrid]]), &f0);
-        err = spatial_interpolation_trilinear(xsi, eta, zeta, xi[igrid], yi[igrid], zi[igrid], grid->xdim, grid->ydim, (float**)(data[ti[igrid]+1]), &f1);
+        err = spatial_interpolation_trilinear(xsi, eta, zeta, xi[igrid], yi[igrid], zi[igrid], f->xdim, f->ydim, (float**)(data[ti[igrid]]), &f0);
+        err = spatial_interpolation_trilinear(xsi, eta, zeta, xi[igrid], yi[igrid], zi[igrid], f->xdim, f->ydim, (float**)(data[ti[igrid]+1]), &f1);
       }
     }
     else if  (interp_method == NEAREST){
       if (grid->zdim==1){
-        err = spatial_interpolation_nearest2D(xsi, eta, xi[igrid], yi[igrid], grid->xdim, (float**)(data[ti[igrid]]), &f0);
-        err = spatial_interpolation_nearest2D(xsi, eta, xi[igrid], yi[igrid], grid->xdim, (float**)(data[ti[igrid]+1]), &f1);
+        err = spatial_interpolation_nearest2D(xsi, eta, xi[igrid], yi[igrid], f->xdim, (float**)(data[ti[igrid]]), &f0);
+        err = spatial_interpolation_nearest2D(xsi, eta, xi[igrid], yi[igrid], f->xdim, (float**)(data[ti[igrid]+1]), &f1);
       } else {
-        err = spatial_interpolation_nearest3D(xsi, eta, zeta, xi[igrid], yi[igrid], zi[igrid], grid->xdim, grid->ydim,
+        err = spatial_interpolation_nearest3D(xsi, eta, zeta, xi[igrid], yi[igrid], zi[igrid], f->xdim, f->ydim,
                                               (float**)(data[ti[igrid]]), &f0);
-        err = spatial_interpolation_nearest3D(xsi, eta, zeta, xi[igrid], yi[igrid], zi[igrid], grid->xdim, grid->ydim,
+        err = spatial_interpolation_nearest3D(xsi, eta, zeta, xi[igrid], yi[igrid], zi[igrid], f->xdim, f->ydim,
                                               (float**)(data[ti[igrid]+1]), &f1);
       }
     }
@@ -146,18 +160,29 @@ static inline ErrorCode temporal_interpolation_structured_grid(float x, float y,
   } else {
     double t0 = grid->time[ti[igrid]];
     err = search_indices(x, y, z, grid->xdim, grid->ydim, grid->zdim, grid->lon, grid->lat, grid->depth, &xi[igrid], &yi[igrid], &zi[igrid], &xsi, &eta, &zeta, grid->sphere_mesh, grid->zonal_periodic, gcode, grid->z4d, ti[igrid], grid->tdim, t0, t0, t0+1); CHECKERROR(err);
+    if ( (xi[igrid] < grid->available_indices[0]) || (xi[igrid] > grid->available_indices[1]) ||
+         (yi[igrid] < grid->available_indices[2]) || (yi[igrid] > grid->available_indices[3]) )
+    {
+       grid->targeted_indices[0] = min(xi[igrid], grid->targeted_indices[0]);
+       grid->targeted_indices[1] = max(xi[igrid]+1, grid->targeted_indices[1]);
+       grid->targeted_indices[2] = min(yi[igrid], grid->targeted_indices[2]);
+       grid->targeted_indices[3] = max(yi[igrid]+1, grid->targeted_indices[3]);
+       return REPEAT;
+    }
+    xi[igrid] -= grid->available_indices[0];
+    yi[igrid] -= grid->available_indices[2];
     if (interp_method == LINEAR){
       if (grid->zdim==1)
-        err = spatial_interpolation_bilinear(xsi, eta, xi[igrid], yi[igrid], grid->xdim, (float**)(data[ti[igrid]]), value);
+        err = spatial_interpolation_bilinear(xsi, eta, xi[igrid], yi[igrid], f->xdim, (float**)(data[ti[igrid]]), value);
       else
-        err = spatial_interpolation_trilinear(xsi, eta, zeta, xi[igrid], yi[igrid], zi[igrid], grid->xdim, grid->ydim,
+        err = spatial_interpolation_trilinear(xsi, eta, zeta, xi[igrid], yi[igrid], zi[igrid], f->xdim, f->ydim,
                                              (float**)(data[ti[igrid]]), value);
     }
     else if (interp_method == NEAREST){
       if (grid->zdim==1)
-        err = spatial_interpolation_nearest2D(xsi, eta, xi[igrid], yi[igrid], grid->xdim, (float**)(data[ti[igrid]]), value);
+        err = spatial_interpolation_nearest2D(xsi, eta, xi[igrid], yi[igrid], f->xdim, (float**)(data[ti[igrid]]), value);
       else {
-        err = spatial_interpolation_nearest3D(xsi, eta, zeta, xi[igrid], yi[igrid], zi[igrid], grid->xdim, grid->ydim,
+        err = spatial_interpolation_nearest3D(xsi, eta, zeta, xi[igrid], yi[igrid], zi[igrid], f->xdim, f->ydim,
                                              (float**)(data[ti[igrid]]), value);
       }
     }

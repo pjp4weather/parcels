@@ -382,46 +382,64 @@ class FieldSet(object):
                 gnew.advanced = True
             f.advancetime(fnew, advance == 1)
 
-    def computeTimeChunk(self, time, dt):
+
+    def loadDataChunk(self, time=None, dt=None):
+        chunksize = 20  # arbitrary...
         signdt = np.sign(dt)
         nextTime = np.infty if dt > 0 else -np.infty
-
+        time_dimension = False
         for g in self.gridset.grids:
             g.update_status = 'not_updated'
-        for f in self.fields:
-            if isinstance(f, VectorField) or not f.grid.defer_load:
-                continue
-            if f.grid.update_status == 'not_updated':
-                nextTime_loc = f.grid.computeTimeChunk(f, time, signdt)
-            nextTime = min(nextTime, nextTime_loc) if signdt >= 0 else max(nextTime, nextTime_loc)
-
-        for f in self.fields:
-            if isinstance(f, VectorField) or not f.grid.defer_load or f.is_gradient:
-                continue
-            g = f.grid
-            if g.update_status == 'first_updated':  # First load of data
-                f.data = np.empty((g.tdim, g.zdim_loaded, g.ydim_loaded, g.xdim_loaded), dtype=np.float32)
-                #data = np.empty((g.tdim, g.zdim, g.ydim-2*g.meridional_halo, g.xdim-2*g.zonal_halo), dtype=np.float32)
-                #for tindex in range(3):
-                #    data = f.computeTimeChunk(data, tindex)
-                #if f._scaling_factor:
-                #    data *= f._scaling_factor
-                #f.data = f.reshape(data)
-            elif g.update_status == 'updated':
-                data = np.empty((g.tdim, g.zdim, g.ydim_loaded-2*g.meridional_halo, g.xdim_loaded-2*g.zonal_halo), dtype=np.float32)
-                if signdt >= 0:
-                    f.data[:2, :] = f.data[1:, :]
-                    tindex = 2
+            if time is not None and g.ti is not None:
+                nextTime_loc = g.setTimeChunk(g.fields[0], time, signdt)  # bug if some fields have allow_time_extra but not all
+                nextTime = min(nextTime, nextTime_loc) if signdt >= 0 else max(nextTime, nextTime_loc)
+                time_dimension = True
+            old_indices = g.available_indices.copy() if g.update_status != 'firstupdated' else None
+            if np.all(old_indices == 0):
+                old_indices = None
+            g.available_indices[0] = int(g.targeted_indices[0]/chunksize) * chunksize
+            g.available_indices[1] = min((int(g.targeted_indices[1]/chunksize)+1) * chunksize, g.xdim)
+            g.available_indices[2] = int(g.targeted_indices[2]/chunksize) * chunksize
+            g.available_indices[3] = min((int(g.targeted_indices[3]/chunksize)+1) * chunksize, g.ydim)
+            g.xdim_loaded = g.available_indices[1]-g.available_indices[0]
+            g.ydim_loaded = g.available_indices[3]-g.available_indices[2]
+            for f in g.fields:
+                if f.source != 'netcdf':
+                    continue
+                if g.zdim > 1:
+                    data = np.empty((g.tdim, g.zdim, g.ydim_loaded-2*g.meridional_halo, g.xdim_loaded-2*g.zonal_halo), dtype=np.float32)
                 else:
-                    f.data[1:, :] = f.data[:2, :]
-                    tindex = 0
-                data = f.computeTimeChunk(data, tindex, g.available_indices, [])
-                if f._scaling_factor:
-                    data *= f._scaling_factor
-                f.data[tindex, :] = f.reshape(data)[tindex, :]
-            if f.gradientx is not None and g.update_status in ['first_updated', 'updated']:
-                f.gradient(update=True)
+                    data = np.empty((g.tdim, g.ydim_loaded-2*g.meridional_halo, g.xdim_loaded-2*g.zonal_halo), dtype=np.float32)
+                if f.data is not None:
+                    meridional_halo2 = g.meridional_halo if g.meridional_halo > 0 else - g.ydim
+                    zonal_halo2 = g.zonal_halo if g.zonal_halo > 0 else - g.xdim
+                    if g.zdim > 1:
+                        data[:,:, ] = f.data[:, :, g.meridional_halo:-meridional_halo2, g.zonal_halo:-zonal_halo2]
 
+                    else:
+                        data[:,old_indices[2]-g.available_indices[2]:old_indices[3]-g.available_indices[2],old_indices[0]-g.available_indices[0]:old_indices[1]-g.available_indices[0]] = f.data[:, g.meridional_halo:-meridional_halo2, g.zonal_halo:-zonal_halo2]
+                if g.update_status == 'first_updated' or not np.all(old_indices == g.available_indices):
+                    for tindex in range(3):
+                        data = f.loadDataChunk(data, tindex, g.available_indices, old_indices)
+                    if f._scaling_factor:
+                        data *= f._scaling_factor
+                    f.data = f.reshape(data)
+                elif g.update_status == 'updated':
+                    if signdt >= 0:
+                        f.data[:2, :] = f.data[1:, :]
+                        tindex = 2
+                    else:
+                        f.data[1:, :] = f.data[:2, :]
+                        tindex = 0
+                    data = f.loadDataChunk(data, tindex, g.available_indices, None)
+                    if f._scaling_factor:
+                        data *= f._scaling_factor
+                    f.data[tindex, :] = f.reshape(data)[tindex, :]
+                            
+                if f.gradientx is not None and g.update_status in ['first_updated', 'updated']:
+                    f.gradient(update=True)
+        if time_dimension is None:
+            return
         if abs(nextTime) == np.infty or np.isnan(nextTime):  # Second happens when dt=0
             return nextTime
         else:
@@ -431,20 +449,3 @@ class FieldSet(object):
             else:
                 return time + nSteps * dt
 
-    def loadSpatialChunk(self):
-        chunksize = 20  # arbitrary...
-        for g in self.gridset.grids:
-            old_indices = g.available_indices.copy()
-            g.available_indices[0] = int(g.targeted_indices[0]/chunksize) * chunksize
-            g.available_indices[1] = min((int(g.targeted_indices[1]/chunksize)+1) * chunksize, g.xdim)
-            g.available_indices[2] = int(g.targeted_indices[2]/chunksize) * chunksize
-            g.available_indices[3] = min((int(g.targeted_indices[3]/chunksize)+1) * chunksize, g.ydim)
-            g.xdim_loaded = g.available_indices[1]-g.available_indices[0]
-            g.ydim_loaded = g.available_indices[3]-g.available_indices[2]
-            for f in g.fields:
-                data = np.empty((g.tdim, g.zdim, g.ydim_loaded, g.xdim_loaded), dtype=np.float32)
-                for tindex in range(3):
-                    data = f.computeTimeChunk(data, tindex, g.available_indices, old_indices)
-                if f._scaling_factor:
-                    data *= f._scaling_factor
-                f.data = f.reshape(data)

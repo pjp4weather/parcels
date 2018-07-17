@@ -51,6 +51,7 @@ class Grid(object):
         self.lat_flipped = False
         self.defer_load = False
         self.fields = []
+        self.ti = None
 
     @property
     def ctypes_struct(self):
@@ -124,8 +125,7 @@ class Grid(object):
         dx = np.where(dx > 180, dx-360, dx)
         self.zonal_periodic = sum(dx) > 359.9
 
-    def computeTimeChunk(self, f, time, signdt):
-        print 'computeTimeChunk'
+    def setTimeChunk(self, f, time, signdt):
         nextTime_loc = np.infty * signdt
         if self.update_status == 'not_updated':
             if self.ti >= 0:
@@ -149,10 +149,6 @@ class Grid(object):
                     self.ti = len(self.time_full) - 3
                 self.time = self.time_full[self.ti:self.ti+3]
                 self.tdim = 3
-                self.xdim_loaded = 0
-                self.ydim_loaded = 0
-                self.zdim_loaded = 0
-                self.available_indices = np.zeros(6, dtype=np.int32)
                 self.update_status = 'first_updated'
             if signdt >= 0 and self.ti < len(self.time_full)-3:
                 nextTime_loc = self.time[2]

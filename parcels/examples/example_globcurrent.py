@@ -97,6 +97,10 @@ def test_globcurrent_variable_fromfield(mode, dt):
     pset = ParticleSet(fieldset, pclass=MyParticle, lon=[25], lat=[-35], time=time)
 
     pset.execute(AdvectionRK4, runtime=delta(days=1), dt=dt)
+    print('lonlat %g %g' % (pset[0].lon, pset[0].lat))
+
+test_globcurrent_variable_fromfield('jit', 300)
+#test_globcurrent_variable_fromfield('scipy', 300)
 
 
 @pytest.mark.parametrize('full_load', [True, False])

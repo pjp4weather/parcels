@@ -244,6 +244,8 @@ class Field(object):
         self.indices = kwargs.pop('indices', None)
         self.timeFiles = kwargs.pop('timeFiles', None)
 
+        self.source = kwargs.pop('source', 'nparray')
+
     @classmethod
     def from_netcdf(cls, filenames, variable, dimensions, indices=None,
                     mesh='spherical', allow_time_extrapolation=None, time_periodic=False, full_load=False, **kwargs):
@@ -322,6 +324,10 @@ class Field(object):
                 grid = CurvilinearZGrid(lon, lat, depth, time, time_origin=time_origin, mesh=mesh)
             else:
                 grid = CurvilinearSGrid(lon, lat, depth, time, time_origin=time_origin, mesh=mesh)
+        grid.xdim_loaded = 0
+        grid.ydim_loaded = 0
+        grid.zdim_loaded = 1
+        grid.available_indices = np.zeros(6, dtype=np.int32)
 
         if 'time' in indices:
             logger.warning_once('time dimension in indices is not necessary anymore. It is then ignored.')
@@ -350,6 +356,7 @@ class Field(object):
             grid.defer_load = True
             grid.time_full = grid.time
             grid.ti = -1
+            grid.tdim = 3
             data = None
 
         if allow_time_extrapolation is None:
@@ -359,6 +366,7 @@ class Field(object):
         kwargs['indices'] = indices
         kwargs['time_periodic'] = time_periodic
         kwargs['timeFiles'] = timeFiles
+        kwargs['source'] = 'netcdf'
 
         return cls(variable, data, grid=grid,
                    allow_time_extrapolation=allow_time_extrapolation, **kwargs)
@@ -574,7 +582,7 @@ class Field(object):
                 elif (grid.lon[0] >= grid.lon[-1]) and (x < grid.lon[0] and x > grid.lon[-1]):
                     raise FieldSamplingError(x, y, z, field=self)
 
-            lon_index = lon_fixed <= x
+            lon_index = lon_fixed < x
             if lon_index.all():
                 xi = len(lon_fixed) - 2
             else:
@@ -583,7 +591,7 @@ class Field(object):
 
         if y < grid.lat[0] or y > grid.lat[-1]:
             raise FieldSamplingError(x, y, z, field=self)
-        lat_index = grid.lat <= y
+        lat_index = grid.lat < y
         if lat_index.all():
             yi = len(grid.lat) - 2
         else:
@@ -863,7 +871,7 @@ class Field(object):
         # Create and populate the c-struct object
         allow_time_extrapolation = 1 if self.allow_time_extrapolation else 0
         time_periodic = 1 if self.time_periodic else 0
-        cstruct = CField(self.grid.xdim, self.grid.ydim, self.grid.zdim,
+        cstruct = CField(self.grid.xdim_loaded, self.grid.ydim_loaded, self.grid.zdim,
                          self.grid.tdim, self.igrid, allow_time_extrapolation, time_periodic,
                          self.data.ctypes.data_as(POINTER(POINTER(c_float))),
                          pointer(self.grid.ctypes_struct))
@@ -889,7 +897,7 @@ class Field(object):
         if with_particles or (not animation):
             show_time = self.grid.time[0] if show_time is None else show_time
             if self.grid.defer_load:
-                self.fieldset.computeTimeChunk(show_time, 1)
+                self.fieldset.loadDataChunk(show_time, 1)
             (idx, periods) = self.time_index(show_time)
             show_time -= periods*(self.grid.time[-1]-self.grid.time[0])
             if self.grid.time.size > 1:
@@ -1002,7 +1010,7 @@ class Field(object):
             self.data = np.concatenate((field_new.data[:, :, :], self.data[:-1, :, :]), 0)
             self.time = self.grid.time
 
-    def computeTimeChunk(self, data, tindex, indices, loaded_indices):
+    def loadDataChunk(self, data, tindex, indices, loaded_indices):
         g = self.grid
         with NetcdfFileBuffer(self.timeFiles[g.ti+tindex], self.dimensions, self.indices) as filebuffer:
             filebuffer.name = self.dimensions['data'] if 'data' in self.dimensions else self.name
@@ -1011,15 +1019,75 @@ class Field(object):
                 assert isinstance(time_data[0], type(g.time_origin)), ('Field %s stores times as dates, but time_origin is not defined ' % self.name)
                 time_data = (time_data - g.time_origin) / np.timedelta64(1, 's')
             ti = (time_data <= g.time[tindex]).argmin() - 1
+
+
+            if loaded_indices is not None:
+                ox = np.zeros((4,2), dtype=int)
+                oy = np.zeros((4,2), dtype=int)
+                ix = np.zeros((4,2), dtype=int)
+                iy = np.zeros((4,2), dtype=int)
+                ox[0,0] = 0
+                ox[0,1] = g.xdim_loaded
+                oy[0,0] = 0
+                oy[0,1] = loaded_indices[2] - indices[2] 
+                ix[0,0] = indices[0]
+                ix[0,1] = indices[1]
+                iy[0,0] = indices[2]
+                iy[0,1] = loaded_indices[2]
+                ox[1,0] = 0
+                ox[1,1] = g.xdim_loaded
+                oy[1,0] = loaded_indices[3] - indices[2]
+                oy[1,1] = g.ydim_loaded 
+                ix[1,0] = indices[0]
+                ix[1,1] = indices[1]
+                iy[1,0] = loaded_indices[3]
+                iy[1,1] = indices[3]
+                ox[2,0] = 0
+                ox[2,1] = loaded_indices[0] - indices[0]
+                oy[2,0] = loaded_indices[2] - indices[2]
+                oy[2,1] = loaded_indices[3] - indices[2]
+                ix[2,0] = indices[0]
+                ix[2,1] = loaded_indices[0]
+                iy[2,0] = loaded_indices[2]
+                iy[2,1] = loaded_indices[3]
+                ox[3,0] = loaded_indices[1] - indices[0]
+                ox[3,1] = g.xdim_loaded
+                oy[3,0] = loaded_indices[2] - indices[2]
+                oy[3,1] = loaded_indices[3] - indices[3]
+                ix[3,0] = loaded_indices[1]
+                ix[3,1] = indices[1]
+                iy[3,0] = loaded_indices[2]
+                iy[3,1] = loaded_indices[3]
+
             if len(filebuffer.dataset[filebuffer.name].shape) == 2:
-                data[tindex, 0, :, :] = filebuffer.data[indices[2]:indices[3], indices[0]:indices[1]]
+                if loaded_indices is None:
+                    data[tindex, 0, :, :] = filebuffer.data[indices[2]:indices[3], indices[0]:indices[1]]
+                else:
+                    for r in range(4):
+                       data[tindex, 0, oy[r,0]:oy[r,1], ox[r,0]:ox[r,1]] = filebuffer.data[iy[r,0]:iy[r,1], ix[r,0]:ix[r,1]]
             elif len(filebuffer.dataset[filebuffer.name].shape) == 3:
                 if g.zdim > 1:
-                    data[tindex, :, :, :] = filebuffer.data[:, indices[2]:indices[3], indices[0]:indices[1]]
+                    if loaded_indices is None:
+                        data[tindex, :, :, :] = filebuffer.data[:, indices[2]:indices[3], indices[0]:indices[1]]
+                    else:
+                        for r in range(4):
+                            data[tindex, :, oy[r,0]:oy[r,1], ox[r,0]:ox[r,1]] = filebuffer.data[:, iy[r,0]:iy[r,1], ix[r,0]:ix[r,1]]
                 else:
-                    data[tindex, 0, :, :] = filebuffer.data[ti, indices[2]:indices[3], indices[0]:indices[1]]
+                    if loaded_indices is None:
+                        data[tindex, :, :] = filebuffer.data[ti, indices[2]:indices[3], indices[0]:indices[1]]
+                    else:
+                        for r in range(4):
+                            if oy[r,0] == oy[r,1] or ox[r,0] == ox[r,1]:
+                                continue
+                            data[tindex, oy[r,0]:oy[r,1], ox[r,0]:ox[r,1]] = filebuffer.data[ti, iy[r,0]:iy[r,1], ix[r,0]:ix[r,1]]
+
             else:
-                data[tindex, :, :, :] = filebuffer.data[ti, :, indices[2]:indices[3], indices[0]:indices[1]]
+                if loaded_indices is None:
+                    data[tindex, :, :, :] = filebuffer.data[ti, :, indices[2]:indices[3], indices[0]:indices[1]]
+                else:
+                    for r in range(4):
+                        data[tindex, :, oy[r,0]:oy[r,1], ox[r,0]:ox[r,1]] = filebuffer.data[ti, :, iy[r,0]:iy[r,1], ix[r,0]:ix[r,1]]
+
         data[np.isnan(data)] = 0.
         if self.vmin is not None:
             data[data < self.vmin] = 0.

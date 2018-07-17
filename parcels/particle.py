@@ -123,7 +123,6 @@ class _Particle(object):
                 lat = self.getInitialValue(ptype, name='lat')
                 depth = self.getInitialValue(ptype, name='depth')
                 time = self.getInitialValue(ptype, name='time')
-                v.initial.fieldset.computeTimeChunk(time, 1)
                 if time is None:
                     logger.error('Cannot initialise a Variable with a Field if no time provided. '
                                  'Add a "time=" to ParticleSet construction')
@@ -131,7 +130,7 @@ class _Particle(object):
                 try:
                     initial = v.initial[time, lon, lat, depth]
                 except Exception as e:
-                    v.initial.fieldset.loadSpatialChunk()
+                    v.initial.fieldset.loadDataChunk(time, 1)
                     initial = v.initial[time, lon, lat, depth]
             else:
                 initial = v.initial

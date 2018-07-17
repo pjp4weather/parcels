@@ -324,7 +324,7 @@ class ParticleSet(object):
             next_prelease = np.infty if dt > 0 else - np.infty
         next_output = time + outputdt if dt > 0 else time - outputdt
         next_movie = time + moviedt if dt > 0 else time - moviedt
-        next_input = self.fieldset.computeTimeChunk(time, np.sign(dt))
+        next_input = self.fieldset.loadDataChunk(time, dt)
 
         tol = 1e-12
         while (time < endtime and dt > 0) or (time > endtime and dt < 0) or dt == 0:
@@ -348,7 +348,7 @@ class ParticleSet(object):
             if abs(time-next_movie) < tol:
                 self.show(field=movie_background_field, show_time=time)
                 next_movie += moviedt * np.sign(dt)
-            next_input = self.fieldset.computeTimeChunk(time, dt)
+            next_input = self.fieldset.loadDataChunk(time, dt)
             if dt == 0:
                 break
 
@@ -428,7 +428,7 @@ class ParticleSet(object):
         elif Basemap is None:
             logger.info("Visualisation is not possible. Basemap not found.")
         else:
-            self.fieldset.computeTimeChunk(show_time, 1)
+            self.fieldset.loadDataChunk(show_time, 1)
             (idx, periods) = self.fieldset.U.time_index(show_time)
             show_time -= periods*(self.fieldset.U.time[-1]-self.fieldset.U.time[0])
             lon = self.fieldset.U.lon
