@@ -189,7 +189,7 @@ class ParticleFile(object):
             self.sync()
             
             
-    def write_pickle_per_id_tstep(self, pset, time, sync=True, deleted_only=False):
+    def write_id_npy(self, pset, time, sync=True, deleted_only=False):
         """Write :class:`parcels.particleset.ParticleSet` data to file pickles. 
          Each pickle contains output for one particle/id.
 
